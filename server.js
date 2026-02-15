@@ -12,6 +12,11 @@ const LOGIN_WINDOW_MS = 1000 * 60 * 5;
 const LOGIN_LIMIT = 20;
 const MESSAGE_WINDOW_MS = 1000 * 60;
 const MESSAGE_LIMIT = 60;
+const DEFAULT_MESSAGES_LIMIT = 100;
+const MAX_MESSAGES_LIMIT = 200;
+
+const sessions = new Map();
+const sseClients = new Map();
 
 const sessions = new Map();
 const sseClients = new Set();
@@ -40,6 +45,9 @@ function loadState() {
 let state = loadState();
 
 function saveState() {
+  const tmpFile = `${DB_FILE}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
+  fs.renameSync(tmpFile, DB_FILE);
   fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2));
 }
 
@@ -124,6 +132,10 @@ function normalizeUsername(input) {
   return String(input || '').trim();
 }
 
+function normalizeMessageText(input) {
+  return String(input || '').replace(/\r/g, '').trim();
+}
+
 function isValidUsername(username) {
   return /^[a-zA-Zа-яА-Я0-9_-]{3,24}$/.test(username);
 }
@@ -145,6 +157,54 @@ function getClientIp(req) {
   return req.socket.remoteAddress || 'unknown';
 }
 
+function getOnlineSummary() {
+  const uniqueUsers = new Map();
+  for (const client of sseClients.values()) {
+    uniqueUsers.set(client.user.id, client.user);
+  }
+  return {
+    count: uniqueUsers.size,
+    users: Array.from(uniqueUsers.values())
+      .sort((a, b) => a.username.localeCompare(b.username))
+      .map((user) => user.username)
+  };
+}
+
+function readMessagePage(searchParams) {
+  const beforeId = Number(searchParams.get('before_id') || '0');
+  const requestedLimit = Number(searchParams.get('limit') || String(DEFAULT_MESSAGES_LIMIT));
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(MAX_MESSAGES_LIMIT, Math.floor(requestedLimit)))
+    : DEFAULT_MESSAGES_LIMIT;
+
+  let source = state.messages;
+  if (beforeId > 0) {
+    source = source.filter((message) => message.id < beforeId);
+  }
+
+  const page = source.slice(-limit);
+  const hasMore = source.length > page.length;
+  return { messages: page, hasMore };
+}
+
+function broadcast(event, payload) {
+  const raw = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const [res] of sseClients.entries()) {
+    if (res.writableEnded) {
+      sseClients.delete(res);
+      continue;
+    }
+    res.write(raw);
+  }
+}
+
+function broadcastPresence() {
+  broadcast('presence', getOnlineSummary());
+}
+
+function serveStatic(req, res, pathname) {
+  const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const filePath = path.resolve(PUBLIC_DIR, relativePath);
 function broadcast(event, payload) {
   const raw = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const client of sseClients) {
@@ -181,11 +241,19 @@ function serveStatic(req, res, pathname) {
             ? 'application/javascript; charset=utf-8'
             : 'application/octet-stream';
 
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'"
+    });
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);
   });
 }
 
+async function handleApi(req, res, pathname, searchParams) {
 async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, users: state.users.length, messages: state.messages.length });
@@ -254,6 +322,16 @@ async function handleApi(req, res, pathname) {
     return sendJson(res, 200, { user: auth.user });
   }
 
+  if (req.method === 'GET' && pathname === '/api/online') {
+    const auth = readAuth(req);
+    if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+    return sendJson(res, 200, getOnlineSummary());
+  }
+
+  if (req.method === 'GET' && pathname === '/api/messages') {
+    const auth = readAuth(req);
+    if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+    return sendJson(res, 200, readMessagePage(searchParams));
   if (req.method === 'GET' && pathname === '/api/messages') {
     const auth = readAuth(req);
     if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
@@ -271,6 +349,7 @@ async function handleApi(req, res, pathname) {
 
     try {
       const body = await parseBody(req);
+      const text = normalizeMessageText(body.text);
       const text = String(body.text || '').trim();
       if (!text) return sendJson(res, 400, { error: 'Text is required' });
       if (text.length > 1000) return sendJson(res, 400, { error: 'Text too long (max 1000)' });
@@ -312,6 +391,13 @@ async function handleApi(req, res, pathname) {
       }
     }, 15000);
 
+    sseClients.set(res, { user: auth.user });
+    broadcastPresence();
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+      broadcastPresence();
     sseClients.add(res);
     req.on('close', () => {
       clearInterval(heartbeat);
@@ -326,6 +412,7 @@ async function handleApi(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (url.pathname.startsWith('/api/')) {
+    await handleApi(req, res, url.pathname, url.searchParams);
     await handleApi(req, res, url.pathname);
     return;
   }

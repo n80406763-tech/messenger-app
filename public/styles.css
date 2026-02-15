@@ -10,6 +10,7 @@ body {
 }
 
 .container {
+  max-width: 900px;
   max-width: 820px;
   margin: 32px auto;
   padding: 0 16px;
@@ -62,6 +63,13 @@ button.danger {
   background: #b42318;
 }
 
+button.ghost {
+  background: #eef2ff;
+  color: #2c6bed;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
 .chat-header {
   display: flex;
   justify-content: space-between;
@@ -71,6 +79,10 @@ button.danger {
 
 .chat-controls {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   align-items: center;
 }
@@ -91,6 +103,15 @@ button.danger {
 .status-badge.online {
   background: #e8f7ea;
   color: #1f8a3a;
+}
+
+.users-badge {
+  background: #fff4db;
+  color: #9a6700;
+}
+
+.messages-wrap {
+  margin-bottom: 12px;
 }
 
 .messages {

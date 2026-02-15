@@ -7,6 +7,19 @@ const chatMessage = document.getElementById('chatMessage');
 const loginBtn = document.getElementById('loginBtn');
 const registerBtn = document.getElementById('registerBtn');
 const logoutBtn = document.getElementById('logoutBtn');
+const loadOlderBtn = document.getElementById('loadOlderBtn');
+const messagesEl = document.getElementById('messages');
+const meLabel = document.getElementById('meLabel');
+const connBadge = document.getElementById('connBadge');
+const onlineBadge = document.getElementById('onlineBadge');
+const messageForm = document.getElementById('messageForm');
+const messageInput = document.getElementById('messageInput');
+
+let token = localStorage.getItem('messenger_token') || '';
+let currentUser = null;
+let streamAbortController = null;
+let reconnectTimer = null;
+let hasOlderMessages = false;
 const messagesEl = document.getElementById('messages');
 const meLabel = document.getElementById('meLabel');
 const connBadge = document.getElementById('connBadge');
@@ -33,6 +46,15 @@ function setConnectionState(online) {
   connBadge.classList.toggle('online', online);
 }
 
+function setOnlineCount(count, users = []) {
+  onlineBadge.textContent = `онлайн: ${count}`;
+  onlineBadge.title = users.length > 0 ? users.join(', ') : '';
+}
+
+function buildMessageNode(message) {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.dataset.messageId = String(message.id || '');
 function renderMessage(message) {
   const div = document.createElement('div');
   div.className = 'msg';
@@ -51,6 +73,28 @@ function renderMessage(message) {
   text.textContent = message.text;
 
   div.append(meta, text);
+  return div;
+}
+
+function appendMessage(message) {
+  const node = buildMessageNode(message);
+  messagesEl.appendChild(node);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function prependMessages(messages) {
+  if (!messages.length) return;
+  const previousHeight = messagesEl.scrollHeight;
+
+  messages.forEach((message) => {
+    const node = buildMessageNode(message);
+    messagesEl.insertBefore(node, messagesEl.firstChild);
+  });
+
+  const afterHeight = messagesEl.scrollHeight;
+  messagesEl.scrollTop += afterHeight - previousHeight;
+}
+
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -81,6 +125,35 @@ function clearRealtime() {
   if (streamAbortController) {
     streamAbortController.abort();
     streamAbortController = null;
+  }
+}
+
+function getFirstMessageId() {
+  const first = messagesEl.querySelector('.msg');
+  if (!first) return 0;
+  return Number(first.dataset.messageId || '0');
+}
+
+function updateLoadOlderVisibility() {
+  loadOlderBtn.style.display = hasOlderMessages ? 'block' : 'none';
+}
+
+async function loadOlderMessages() {
+  const firstId = getFirstMessageId();
+  if (!firstId || !hasOlderMessages) return;
+
+  try {
+    loadOlderBtn.disabled = true;
+    loadOlderBtn.textContent = 'Загрузка...';
+    const payload = await api(`/api/messages?before_id=${firstId}&limit=40`);
+    prependMessages(payload.messages || []);
+    hasOlderMessages = Boolean(payload.hasMore);
+    updateLoadOlderVisibility();
+  } catch (error) {
+    setChatMessage(error.message, true);
+  } finally {
+    loadOlderBtn.disabled = false;
+    loadOlderBtn.textContent = 'Загрузить более старые';
   }
 }
 
@@ -126,10 +199,24 @@ async function connectRealtime() {
         if (!eventLine || !dataLine) return;
 
         const event = eventLine.replace('event: ', '');
+        const rawData = dataLine.replace('data: ', '');
+
         if (event === 'ping' || event === 'ready') return;
 
         if (event === 'message') {
           try {
+            const message = JSON.parse(rawData);
+            appendMessage(message);
+          } catch {
+            // noop
+          }
+          return;
+        }
+
+        if (event === 'presence') {
+          try {
+            const presence = JSON.parse(rawData);
+            setOnlineCount(presence.count || 0, presence.users || []);
             const message = JSON.parse(dataLine.replace('data: ', ''));
             renderMessage(message);
           } catch {
@@ -138,6 +225,7 @@ async function connectRealtime() {
         }
       });
     }
+  } catch {
   } catch (error) {
     if (!token) return;
     setConnectionState(false);
@@ -154,6 +242,15 @@ async function enterChat(user) {
   chatPanel.classList.remove('hidden');
   meLabel.textContent = `Вы: ${user.username}`;
 
+  const { messages, hasMore } = await api('/api/messages?limit=40');
+  hasOlderMessages = Boolean(hasMore);
+  updateLoadOlderVisibility();
+
+  messagesEl.innerHTML = '';
+  messages.forEach(appendMessage);
+
+  const online = await api('/api/online');
+  setOnlineCount(online.count || 0, online.users || []);
   const { messages } = await api('/api/messages');
   messagesEl.innerHTML = '';
   messages.forEach(renderMessage);
@@ -164,6 +261,14 @@ async function enterChat(user) {
 function resetAuthUI() {
   currentUser = null;
   token = '';
+  localStorage.removeItem('messenger_token');
+  clearRealtime();
+  setConnectionState(false);
+  setOnlineCount(0, []);
+  setChatMessage('');
+  messagesEl.innerHTML = '';
+  hasOlderMessages = false;
+  updateLoadOlderVisibility();
   clearRealtime();
   setConnectionState(false);
   setChatMessage('');
@@ -198,10 +303,23 @@ async function auth(mode) {
     });
 
     token = loginData.token;
+    localStorage.setItem('messenger_token', token);
+
     setAuthMessage('');
     await enterChat(loginData.user);
   } catch (error) {
     setAuthMessage(error.message, true);
+  }
+}
+
+async function restoreSession() {
+  if (!token) return;
+
+  try {
+    const { user } = await api('/api/me');
+    await enterChat(user);
+  } catch {
+    resetAuthUI();
   }
 }
 
@@ -224,6 +342,9 @@ async function logout() {
 loginBtn.addEventListener('click', () => auth('login'));
 registerBtn.addEventListener('click', () => auth('register'));
 logoutBtn.addEventListener('click', logout);
+loadOlderBtn.addEventListener('click', () => {
+  loadOlderMessages().catch(() => {});
+});
 
 messageForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -243,3 +364,5 @@ messageForm.addEventListener('submit', async (event) => {
 });
 
 window.addEventListener('beforeunload', clearRealtime);
+updateLoadOlderVisibility();
+restoreSession().catch(() => {});
