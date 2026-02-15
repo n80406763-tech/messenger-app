@@ -20,6 +20,16 @@ let currentUser = null;
 let streamAbortController = null;
 let reconnectTimer = null;
 let hasOlderMessages = false;
+const messagesEl = document.getElementById('messages');
+const meLabel = document.getElementById('meLabel');
+const connBadge = document.getElementById('connBadge');
+const messageForm = document.getElementById('messageForm');
+const messageInput = document.getElementById('messageInput');
+
+let token = '';
+let currentUser = null;
+let streamAbortController = null;
+let reconnectTimer = null;
 
 function setAuthMessage(text, isError = false) {
   authMessage.textContent = text;
@@ -45,6 +55,9 @@ function buildMessageNode(message) {
   const div = document.createElement('div');
   div.className = 'msg';
   div.dataset.messageId = String(message.id || '');
+function renderMessage(message) {
+  const div = document.createElement('div');
+  div.className = 'msg';
   if (currentUser && message.sender === currentUser.username) {
     div.classList.add('my');
   }
@@ -80,6 +93,10 @@ function prependMessages(messages) {
 
   const afterHeight = messagesEl.scrollHeight;
   messagesEl.scrollTop += afterHeight - previousHeight;
+}
+
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function api(path, options = {}) {
@@ -200,6 +217,8 @@ async function connectRealtime() {
           try {
             const presence = JSON.parse(rawData);
             setOnlineCount(presence.count || 0, presence.users || []);
+            const message = JSON.parse(dataLine.replace('data: ', ''));
+            renderMessage(message);
           } catch {
             // noop
           }
@@ -207,6 +226,7 @@ async function connectRealtime() {
       });
     }
   } catch {
+  } catch (error) {
     if (!token) return;
     setConnectionState(false);
     setChatMessage('Realtime отключён, переподключаемся...', true);
@@ -231,6 +251,9 @@ async function enterChat(user) {
 
   const online = await api('/api/online');
   setOnlineCount(online.count || 0, online.users || []);
+  const { messages } = await api('/api/messages');
+  messagesEl.innerHTML = '';
+  messages.forEach(renderMessage);
 
   await connectRealtime();
 }
@@ -246,6 +269,10 @@ function resetAuthUI() {
   messagesEl.innerHTML = '';
   hasOlderMessages = false;
   updateLoadOlderVisibility();
+  clearRealtime();
+  setConnectionState(false);
+  setChatMessage('');
+  messagesEl.innerHTML = '';
   chatPanel.classList.add('hidden');
   authPanel.classList.remove('hidden');
 }

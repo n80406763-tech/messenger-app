@@ -17,6 +17,9 @@ const MAX_MESSAGES_LIMIT = 200;
 
 const sessions = new Map();
 const sseClients = new Map();
+
+const sessions = new Map();
+const sseClients = new Set();
 const ipLoginRequests = new Map();
 const userMessageRequests = new Map();
 
@@ -45,6 +48,7 @@ function saveState() {
   const tmpFile = `${DB_FILE}.tmp`;
   fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2));
   fs.renameSync(tmpFile, DB_FILE);
+  fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2));
 }
 
 function parseBody(req) {
@@ -201,6 +205,20 @@ function broadcastPresence() {
 function serveStatic(req, res, pathname) {
   const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const filePath = path.resolve(PUBLIC_DIR, relativePath);
+function broadcast(event, payload) {
+  const raw = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    if (client.writableEnded) {
+      sseClients.delete(client);
+      continue;
+    }
+    client.write(raw);
+  }
+}
+
+function serveStatic(req, res, pathname) {
+  const safePath = pathname === '/' ? '/index.html' : pathname;
+  const filePath = path.join(PUBLIC_DIR, safePath);
   if (!filePath.startsWith(PUBLIC_DIR)) {
     sendJson(res, 403, { error: 'Forbidden' });
     return;
@@ -230,11 +248,13 @@ function serveStatic(req, res, pathname) {
       'Referrer-Policy': 'no-referrer',
       'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'"
     });
+    res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);
   });
 }
 
 async function handleApi(req, res, pathname, searchParams) {
+async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, users: state.users.length, messages: state.messages.length });
   }
@@ -312,6 +332,10 @@ async function handleApi(req, res, pathname, searchParams) {
     const auth = readAuth(req);
     if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
     return sendJson(res, 200, readMessagePage(searchParams));
+  if (req.method === 'GET' && pathname === '/api/messages') {
+    const auth = readAuth(req);
+    if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+    return sendJson(res, 200, { messages: state.messages.slice(-100) });
   }
 
   if (req.method === 'POST' && pathname === '/api/messages') {
@@ -326,6 +350,7 @@ async function handleApi(req, res, pathname, searchParams) {
     try {
       const body = await parseBody(req);
       const text = normalizeMessageText(body.text);
+      const text = String(body.text || '').trim();
       if (!text) return sendJson(res, 400, { error: 'Text is required' });
       if (text.length > 1000) return sendJson(res, 400, { error: 'Text too long (max 1000)' });
 
@@ -373,6 +398,10 @@ async function handleApi(req, res, pathname, searchParams) {
       clearInterval(heartbeat);
       sseClients.delete(res);
       broadcastPresence();
+    sseClients.add(res);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
     });
     return;
   }
@@ -384,6 +413,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (url.pathname.startsWith('/api/')) {
     await handleApi(req, res, url.pathname, url.searchParams);
+    await handleApi(req, res, url.pathname);
     return;
   }
 
