@@ -41,6 +41,29 @@
 
 Важно: писать аккаунтам поддержки напрямую нельзя — только через «Чат поддержки». Для обычного пользователя аккаунты поддержки скрыты в поиске людей и не отображаются как отдельные собеседники.
 
+## USB-доступ для Windows (Master/User флешки + предлогон)
+
+Для сценария с разными типами флешек (master и обычные), привязкой к конкретному ПК, запуском перед входом в Windows и ограничением сетевого доступа см. отдельную инструкцию:
+
+- `docs/windows-usb-access-control.md`
+
+Быстрый вариант «2 скрипта»:
+
+1. Выпуск флешки: `scripts/windows/Create-UsbFlash.ps1`
+2. Установка на ПК: `scripts/windows/Install-UsbAccessControl.ps1`
+
+Если хотите сначала получить всё на Рабочем столе одним запуском:
+
+- `scripts/windows/Build-Desktop-UsbKit.ps1` (создаёт папку `Desktop\UsbAccessKit` со всеми скриптами)
+
+Дополнительные скрипты:
+
+- `scripts/windows/Build-Desktop-UsbKit.ps1` — собирает готовый набор скриптов на Desktop
+- `scripts/windows/New-UsbToken.ps1` — низкоуровневый выпуск подписанных USB-токенов
+- `scripts/windows/Test-UsbToken.ps1` — проверка токена (подпись/ПК/срок/отзыв)
+- `scripts/windows/UsbAccessAgent.ps1` — локальный агент, применяющий master-доступ
+- `scripts/windows/Apply-UsbPolicyHardening.ps1` — локальный baseline hardening
+
 ## Стек
 
 - Node.js (без внешних зависимостей)
