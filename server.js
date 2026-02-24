@@ -56,6 +56,7 @@ function createInitialState() {
     conversations: [],
     messages: [],
     pushInbox: {},
+    recentClientMessages: {},
     nextUserId: 1,
     nextConversationId: 1,
     nextMessageId: 1
@@ -72,6 +73,10 @@ function loadState() {
       conversations: parsed.conversations || [],
       messages: parsed.messages || [],
       pushInbox: parsed.pushInbox && typeof parsed.pushInbox === 'object' ? parsed.pushInbox : {},
+      recentClientMessages:
+        parsed.recentClientMessages && typeof parsed.recentClientMessages === 'object'
+          ? parsed.recentClientMessages
+          : {},
       nextUserId: parsed.nextUserId || 1,
       nextConversationId: parsed.nextConversationId || 1,
       nextMessageId: parsed.nextMessageId || 1
@@ -227,6 +232,38 @@ function hasSubscriptionEndpoint(endpoint) {
   return state.users.some((u) =>
     Array.isArray(u.pushSubscriptions) && u.pushSubscriptions.some((sub) => sub.endpoint === endpoint)
   );
+}
+
+function cleanupRecentClientMessages(nowTs = Date.now()) {
+  const ttlMs = 1000 * 60 * 10;
+  const maxEntries = 5000;
+  const entries = Object.entries(state.recentClientMessages || {});
+
+  for (const [key, item] of entries) {
+    if (!item || nowTs - Number(item.createdAtMs || 0) > ttlMs) {
+      delete state.recentClientMessages[key];
+    }
+  }
+
+  const left = Object.entries(state.recentClientMessages || {});
+  if (left.length <= maxEntries) return;
+
+  left
+    .sort((a, b) => Number(a[1].createdAtMs || 0) - Number(b[1].createdAtMs || 0))
+    .slice(0, left.length - maxEntries)
+    .forEach(([key]) => {
+      delete state.recentClientMessages[key];
+    });
+}
+
+function normalizeClientMessageId(value) {
+  const id = String(value || '').trim();
+  if (!id || id.length > 120) return '';
+  return id;
+}
+
+function dedupeKey(userId, conversationId, clientMessageId) {
+  return `${userId}:${conversationId}:${clientMessageId}`;
 }
 
 function sendWebPush(subscription) {
@@ -1186,6 +1223,20 @@ async function handleApi(req, res, pathname, searchParams = null) {
       const body = await parseBody(req);
       const text = normalizeText(body.text);
       const attachment = body.attachment ? parseAttachmentDataUrl(body.attachment.dataUrl) : null;
+      const clientMessageId = normalizeClientMessageId(body.clientMessageId);
+
+      cleanupRecentClientMessages();
+      if (clientMessageId) {
+        const key = dedupeKey(auth.user.id, conversation.id, clientMessageId);
+        const existingId = state.recentClientMessages[key]?.messageId;
+        if (existingId) {
+          const existingMessage = state.messages.find((m) => m.id === existingId);
+          if (existingMessage) {
+            return sendJson(res, 200, { message: serializeMessageForViewer(existingMessage, auth.user.id), deduped: true });
+          }
+          delete state.recentClientMessages[key];
+        }
+      }
 
       const complaintType = normalizeText(body.complaintType || '');
       const isSupportComplaint =
@@ -1203,12 +1254,19 @@ async function handleApi(req, res, pathname, searchParams = null) {
         id: state.nextMessageId++,
         conversationId,
         senderId: auth.user.id,
+        clientMessageId: clientMessageId || null,
         text: text || (isSupportComplaint ? `Жалоба: ${complaintType}` : ''),
         attachment,
         createdAt: new Date().toISOString()
       };
 
       state.messages.push(message);
+      if (clientMessageId) {
+        state.recentClientMessages[dedupeKey(auth.user.id, conversation.id, clientMessageId)] = {
+          messageId: message.id,
+          createdAtMs: Date.now()
+        };
+      }
       if (state.messages.length > 5000) state.messages = state.messages.slice(-5000);
       saveState();
 
@@ -1243,7 +1301,8 @@ async function handleApi(req, res, pathname, searchParams = null) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
-      Connection: 'keep-alive'
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
     });
 
     const heartbeat = setInterval(() => {

@@ -64,6 +64,8 @@ const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 const togglePushBtn = document.getElementById('togglePushBtn');
 const pushStatus = document.getElementById('pushStatus');
+const themeSelect = document.getElementById('themeSelect');
+const compactModeCheckbox = document.getElementById('compactModeCheckbox');
 
 let token = localStorage.getItem('messenger_token') || '';
 let currentUser = null;
@@ -78,6 +80,8 @@ let supportCategories = [];
 let groupModalMode = 'create';
 let selectedAvatarDataUrl = undefined;
 const shownNotificationIds = new Set();
+const renderedMessageIds = new Set();
+let isSendingMessage = false;
 
 function setAuthMessage(text, isError = false) {
   authMessage.textContent = text;
@@ -137,6 +141,24 @@ function setSidebarTab(tab) {
   contactsSection?.classList.toggle('hidden', !isContacts);
   settingsSection?.classList.toggle('hidden', !isSettings);
 }
+
+function applyTheme(theme) {
+  document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+}
+
+function applyCompactMode(enabled) {
+  document.body.classList.toggle('compact-ui', Boolean(enabled));
+}
+
+function initUiSettings() {
+  const savedTheme = localStorage.getItem('messenger_theme') || 'light';
+  const compact = localStorage.getItem('messenger_compact_ui') === '1';
+  if (themeSelect) themeSelect.value = savedTheme;
+  if (compactModeCheckbox) compactModeCheckbox.checked = compact;
+  applyTheme(savedTheme);
+  applyCompactMode(compact);
+}
+
 
 function maybeShowForegroundNotification(message) {
   if (!message || !currentUser) return;
@@ -248,6 +270,9 @@ function messageNode(message) {
 }
 
 function appendMessage(message, scroll = true) {
+  if (!message || !message.id) return;
+  if (renderedMessageIds.has(message.id)) return;
+  renderedMessageIds.add(message.id);
   messagesEl.appendChild(messageNode(message));
   if (scroll) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -255,7 +280,11 @@ function appendMessage(message, scroll = true) {
 function prependMessages(messages) {
   if (!messages.length) return;
   const before = messagesEl.scrollHeight;
-  messages.forEach((m) => messagesEl.insertBefore(messageNode(m), messagesEl.firstChild));
+  messages.forEach((m) => {
+    if (!m || !m.id || renderedMessageIds.has(m.id)) return;
+    renderedMessageIds.add(m.id);
+    messagesEl.insertBefore(messageNode(m), messagesEl.firstChild);
+  });
   messagesEl.scrollTop += messagesEl.scrollHeight - before;
 }
 
@@ -309,6 +338,7 @@ async function openConversation(conversationId) {
 
   const data = await api(`/api/conversations/${conv.id}/messages?limit=30`);
   messagesEl.innerHTML = '';
+  renderedMessageIds.clear();
   (data.messages || []).forEach((m) => appendMessage(m));
 
   hasOlder = Boolean(data.hasMore);
@@ -399,6 +429,7 @@ async function connectRealtime() {
       }
     }
   } catch {
+    streamAbortController = null;
     if (!token) return;
     setConnectionState(false);
     reconnectTimer = setTimeout(() => connectRealtime().catch(() => {}), 1500);
@@ -672,25 +703,46 @@ async function sendSupportComplaint(category) {
 
 async function sendMessage() {
   if (!activeConversation) return setChatMessage('Сначала выберите чат', true);
+  if (isSendingMessage) return;
 
-  const text = messageInput.value.trim();
-  const file = mediaInput.files[0];
+  isSendingMessage = true;
+  const submitButton = messageForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
 
-  let attachment = null;
-  if (file) {
-    const dataUrl = await fileToAttachmentDataUrl(file);
-    attachment = { dataUrl };
+  try {
+    const text = messageInput.value.trim();
+    const file = mediaInput.files[0];
+
+    let attachment = null;
+    if (file) {
+      const dataUrl = await fileToAttachmentDataUrl(file);
+      attachment = { dataUrl };
+    }
+
+    const clientMessageId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const data = await api(`/api/conversations/${activeConversation.id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text, attachment, clientMessageId })
+    });
+
+    if (data?.message && activeConversation?.id === data.message.conversationId) {
+      appendMessage(data.message);
+    }
+
+    await loadConversations();
+
+    messageInput.value = '';
+    mediaInput.value = '';
+    mediaPreview.classList.add('hidden');
+    mediaPreview.innerHTML = '';
+  } finally {
+    isSendingMessage = false;
+    if (submitButton) submitButton.disabled = false;
   }
-
-  await api(`/api/conversations/${activeConversation.id}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({ text, attachment })
-  });
-
-  messageInput.value = '';
-  mediaInput.value = '';
-  mediaPreview.classList.add('hidden');
-  mediaPreview.innerHTML = '';
 }
 
 
@@ -842,6 +894,10 @@ async function openSettingsModal() {
     const { agents } = await api('/api/support/agents');
     renderSupportAgents(agents || []);
   }
+
+  themeSelect.value = localStorage.getItem('messenger_theme') || 'light';
+  compactModeCheckbox.checked = localStorage.getItem('messenger_compact_ui') === '1';
+
   settingsModal.classList.remove('hidden');
   await refreshPushUi();
 }
@@ -860,6 +916,14 @@ async function saveSettings() {
   if (selectedAvatarDataUrl !== undefined) payload.avatarDataUrl = selectedAvatarDataUrl;
 
   const data = await api('/api/profile', { method: 'POST', body: JSON.stringify(payload) });
+
+  const nextTheme = themeSelect?.value || 'light';
+  const compactUi = Boolean(compactModeCheckbox?.checked);
+  localStorage.setItem('messenger_theme', nextTheme);
+  localStorage.setItem('messenger_compact_ui', compactUi ? '1' : '0');
+  applyTheme(nextTheme);
+  applyCompactMode(compactUi);
+
   currentUser = data.user;
   meLabel.textContent = `@${currentUser.username}`;
 
@@ -1031,6 +1095,8 @@ supportChatBtnTab?.addEventListener('click', async () => {
 tabChatsBtn?.addEventListener('click', () => setSidebarTab('chats'));
 tabContactsBtn?.addEventListener('click', () => setSidebarTab('contacts'));
 tabSettingsBtn?.addEventListener('click', () => setSidebarTab('settings'));
+themeSelect?.addEventListener('change', () => applyTheme(themeSelect.value));
+compactModeCheckbox?.addEventListener('change', () => applyCompactMode(compactModeCheckbox.checked));
 
 loadOlderBtn.addEventListener('click', () => loadOlderMessages().catch((e) => setChatMessage(e.message, true)));
 mediaInput.addEventListener('change', updateMediaPreview);
@@ -1041,7 +1107,10 @@ messageForm.addEventListener('submit', (e) => {
 
 window.addEventListener('beforeunload', clearRealtime);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') syncPushSubscription().catch(() => {});
+  if (document.visibilityState === 'visible') {
+    syncPushSubscription().catch(() => {});
+    if (token && !streamAbortController) connectRealtime().catch(() => {});
+  }
 });
 
 if ('serviceWorker' in navigator) {
@@ -1050,4 +1119,5 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+initUiSettings();
 restoreSession().catch(() => {});
