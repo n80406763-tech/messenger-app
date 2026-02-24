@@ -573,12 +573,16 @@ function renderGroupCandidates() {
 }
 
 async function refreshUsersCache() {
-  const data = await api('/api/users/search?q=');
+  const data = await api('/api/users/search?mode=contains&q=*');
   allUsersCache = data.users || [];
 }
 
 async function searchUsers() {
   const q = userSearchInput.value.trim();
+  if (!q) {
+    renderSearchResults([]);
+    return;
+  }
   const data = await api(`/api/users/search?q=${encodeURIComponent(q)}`);
   renderSearchResults(data.users || []);
 }

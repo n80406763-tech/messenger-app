@@ -958,10 +958,17 @@ async function handleApi(req, res, pathname, searchParams = null) {
     if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
 
     const q = normalizeUsername(params.get('q') || '').toLowerCase();
+    const mode = String(params.get('mode') || 'exact').toLowerCase();
+
     const users = state.users
       .filter((u) => u.id !== auth.user.id)
       .filter((u) => (isSupportRole(auth.user) ? true : !isSupportRole(u)))
-      .filter((u) => (q ? u.username.toLowerCase().includes(q) : true))
+      .filter((u) => {
+        if (mode === 'contains' && q === '*') return true;
+        if (!q) return false;
+        if (mode === 'contains') return u.username.toLowerCase().includes(q);
+        return u.username.toLowerCase() === q;
+      })
       .slice(0, 20)
       .map((u) => toPublicUser(u, auth.user.id));
 
