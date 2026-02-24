@@ -208,6 +208,16 @@ function pullPushPayload(endpoint) {
   return payload;
 }
 
+function pullAllPushPayloads(endpoint, limit = 20) {
+  const out = [];
+  for (let i = 0; i < limit; i += 1) {
+    const next = pullPushPayload(endpoint);
+    if (!next) break;
+    out.push(next);
+  }
+  return out;
+}
+
 function removePushInbox(endpoint) {
   if (!endpoint) return;
   delete state.pushInbox[pushInboxKey(endpoint)];
@@ -901,9 +911,9 @@ async function handleApi(req, res, pathname, searchParams = null) {
     if (!endpoint) return sendJson(res, 400, { error: 'Endpoint required' });
     if (!hasSubscriptionEndpoint(endpoint)) return sendJson(res, 404, { error: 'Subscription not found' });
 
-    const payload = pullPushPayload(endpoint);
+    const payloads = pullAllPushPayloads(endpoint, 20);
     saveState();
-    return sendJson(res, 200, { notification: payload });
+    return sendJson(res, 200, { notifications: payloads, notification: payloads[0] || null });
   }
 
   if (req.method === 'GET' && pathname === '/api/users/search') {

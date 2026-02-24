@@ -46,9 +46,7 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
-      let title = 'Messenger';
-      let body = 'Новое сообщение';
-      let url = '/';
+      let notifications = [];
 
       try {
         const subscription = await self.registration.pushManager.getSubscription();
@@ -56,23 +54,30 @@ self.addEventListener('push', (event) => {
           const response = await fetch(`/api/push/pull?endpoint=${encodeURIComponent(subscription.endpoint)}`);
           if (response.ok) {
             const data = await response.json();
-            if (data?.notification) {
-              title = data.notification.title || title;
-              body = data.notification.body || body;
-              url = data.notification.url || url;
-            }
+            if (Array.isArray(data?.notifications) && data.notifications.length) notifications = data.notifications;
+            else if (data?.notification) notifications = [data.notification];
           }
         }
       } catch {
         // fallback to generic notification
       }
 
-      await self.registration.showNotification(title, {
-        body,
-        badge: '/icon-192.svg',
-        icon: '/icon-192.svg',
-        data: { url }
-      });
+      if (!notifications.length) {
+        notifications = [{ title: 'Messenger', body: 'Новое сообщение', url: '/' }];
+      }
+
+      await Promise.all(
+        notifications.map((item) =>
+          self.registration.showNotification(item.title || 'Messenger', {
+            body: item.body || 'Новое сообщение',
+            badge: '/icon-192.svg',
+            icon: '/icon-192.svg',
+            tag: `msg-${item.messageId || Date.now()}`,
+            renotify: false,
+            data: { url: item.url || '/' }
+          })
+        )
+      );
     })()
   );
 });
