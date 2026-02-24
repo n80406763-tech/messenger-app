@@ -82,6 +82,7 @@ let selectedAvatarDataUrl = undefined;
 const shownNotificationIds = new Set();
 const renderedMessageIds = new Set();
 let isSendingMessage = false;
+let conversationSyncTimer = null;
 
 function setAuthMessage(text, isError = false) {
   authMessage.textContent = text;
@@ -112,6 +113,8 @@ function clearRealtime() {
   reconnectTimer = null;
   if (streamAbortController) streamAbortController.abort();
   streamAbortController = null;
+  if (conversationSyncTimer) clearInterval(conversationSyncTimer);
+  conversationSyncTimer = null;
 }
 
 function showToast(text) {
@@ -363,6 +366,35 @@ async function loadOlderMessages() {
     loadOlderBtn.textContent = 'Загрузить старые сообщения';
     loadOlderBtn.disabled = false;
   }
+}
+
+
+async function syncActiveConversationMessages() {
+  if (!token || !activeConversation) return;
+
+  try {
+    const data = await api(`/api/conversations/${activeConversation.id}/messages?limit=30`);
+    const incoming = data.messages || [];
+
+    for (const msg of incoming) {
+      if (!msg?.id || renderedMessageIds.has(msg.id)) continue;
+      appendMessage(msg, false);
+    }
+
+    if (incoming.length) messagesEl.scrollTop = messagesEl.scrollHeight;
+    hasOlder = Boolean(data.hasMore);
+    loadOlderBtn.classList.toggle('hidden', !hasOlder);
+  } catch {
+    // silent fallback sync
+  }
+}
+
+function startConversationSync() {
+  if (conversationSyncTimer) clearInterval(conversationSyncTimer);
+  conversationSyncTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    syncActiveConversationMessages().catch(() => {});
+  }, 3500);
 }
 
 async function connectRealtime() {
@@ -961,6 +993,7 @@ async function enterApp(user) {
 
   if (conversations[0]) await openConversation(conversations[0].id);
   await connectRealtime();
+  startConversationSync();
 }
 
 async function auth(mode) {
@@ -1110,7 +1143,14 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     syncPushSubscription().catch(() => {});
     if (token && !streamAbortController) connectRealtime().catch(() => {});
+    if (token) syncActiveConversationMessages().catch(() => {});
   }
+});
+
+window.addEventListener('online', () => {
+  if (!token) return;
+  if (!streamAbortController) connectRealtime().catch(() => {});
+  syncActiveConversationMessages().catch(() => {});
 });
 
 if ('serviceWorker' in navigator) {

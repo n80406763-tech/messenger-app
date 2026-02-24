@@ -33,16 +33,18 @@ body {
   background: radial-gradient(circle at top left, var(--bg-1), var(--bg-2));
   color: var(--text-main);
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .app {
   max-width: 1240px;
   height: 100dvh;
   margin: 0 auto;
-  padding: 10px 12px 34px;
+  padding: 10px 12px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-version {
@@ -58,10 +60,15 @@ body {
 }
 
 .app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 6px;
   text-align: center;
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 6px;
+  z-index: 20;
+  pointer-events: none;
 }
 
 .card {
@@ -465,7 +472,7 @@ button:disabled {
 
 @media (max-width: 700px) {
   .app {
-    padding: 0 0 30px;
+    padding: 0;
   }
 
   .card {
@@ -485,6 +492,7 @@ button:disabled {
   .dialog {
     height: 56vh;
     padding-top: 10px;
+    padding-bottom: 44px;
   }
 
   .composer-row,
