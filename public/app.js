@@ -38,6 +38,7 @@ const contactsSection = document.getElementById('contactsSection');
 const settingsSection = document.getElementById('settingsSection');
 const openSettingsBtnTab = document.getElementById('openSettingsBtnTab');
 const logoutBtnTab = document.getElementById('logoutBtnTab');
+const backToListBtn = document.getElementById('backToListBtn');
 
 const groupModal = document.getElementById('groupModal');
 const groupModalTitle = document.getElementById('groupModalTitle');
@@ -143,6 +144,26 @@ function setSidebarTab(tab) {
   chatsSectionActions?.classList.toggle('hidden', !isChats);
   contactsSection?.classList.toggle('hidden', !isContacts);
   settingsSection?.classList.toggle('hidden', !isSettings);
+
+  if (isMobileLayout() && !isChats) setMobileDialogMode(false);
+}
+
+
+function isMobileLayout() {
+  return window.matchMedia('(max-width: 700px)').matches;
+}
+
+function setMobileDialogMode(inDialog) {
+  if (!chatPanel) return;
+
+  if (!isMobileLayout()) {
+    chatPanel.classList.remove('dialog-only');
+    backToListBtn?.classList.add('hidden');
+    return;
+  }
+
+  chatPanel.classList.toggle('dialog-only', Boolean(inDialog));
+  backToListBtn?.classList.toggle('hidden', !inDialog);
 }
 
 function applyTheme(theme) {
@@ -346,6 +367,7 @@ async function openConversation(conversationId) {
 
   hasOlder = Boolean(data.hasMore);
   loadOlderBtn.classList.toggle('hidden', !hasOlder);
+  setMobileDialogMode(true);
 }
 
 async function loadOlderMessages() {
@@ -996,6 +1018,7 @@ async function enterApp(user) {
   renderGroupCandidates();
 
   if (conversations[0]) await openConversation(conversations[0].id);
+  else setMobileDialogMode(false);
   await connectRealtime();
   startConversationSync();
 }
@@ -1132,6 +1155,7 @@ supportChatBtnTab?.addEventListener('click', async () => {
 tabChatsBtn?.addEventListener('click', () => setSidebarTab('chats'));
 tabContactsBtn?.addEventListener('click', () => setSidebarTab('contacts'));
 tabSettingsBtn?.addEventListener('click', () => setSidebarTab('settings'));
+backToListBtn?.addEventListener('click', () => setMobileDialogMode(false));
 themeSelect?.addEventListener('change', () => applyTheme(themeSelect.value));
 compactModeCheckbox?.addEventListener('change', () => applyCompactMode(compactModeCheckbox.checked));
 
@@ -1143,6 +1167,13 @@ messageForm.addEventListener('submit', (e) => {
 });
 
 window.addEventListener('beforeunload', clearRealtime);
+window.addEventListener('resize', () => {
+  if (!activeConversation) {
+    setMobileDialogMode(false);
+    return;
+  }
+  setMobileDialogMode(chatPanel.classList.contains('dialog-only'));
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     syncPushSubscription().catch(() => {});
@@ -1164,4 +1195,5 @@ if ('serviceWorker' in navigator) {
 }
 
 initUiSettings();
+setMobileDialogMode(false);
 restoreSession().catch(() => {});

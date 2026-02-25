@@ -293,6 +293,10 @@ button:disabled {
   align-items: center;
 }
 
+.back-btn {
+  margin-bottom: 8px;
+}
+
 .badge {
   background: #e5e7eb;
   border-radius: 999px;
@@ -483,16 +487,29 @@ button:disabled {
 
   .chat {
     gap: 0;
+    grid-template-columns: 1fr;
   }
 
-  .sidebar {
-    height: 44vh;
+  .sidebar,
+  .dialog {
+    height: calc(100dvh - 38px);
   }
 
   .dialog {
-    height: 56vh;
     padding-top: 10px;
     padding-bottom: 44px;
+  }
+
+  .chat:not(.dialog-only) .dialog {
+    display: none;
+  }
+
+  .chat.dialog-only .sidebar {
+    display: none;
+  }
+
+  .chat.dialog-only .dialog {
+    display: flex;
   }
 
   .composer-row,
