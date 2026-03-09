@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="122" fill="url(#bg)"/>
+  <path d="M98 154h316c33 0 60 27 60 60v136c0 33-27 60-60 60H282l-88 55a18 18 0 0 1-28-15v-40H98c-33 0-60-27-60-60V214c0-33 27-60 60-60z" fill="#fff"/>
+  <text x="256" y="307" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="118" font-weight="800" fill="#0f172a">NMS</text>
+  <circle cx="400" cy="112" r="38" fill="url(#accent)"/>
+</svg>
